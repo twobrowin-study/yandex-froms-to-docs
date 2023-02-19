@@ -6,6 +6,8 @@ from mail import SendDocuments
 
 from dateutil.parser import parse
 
+import json
+
 def handler(event, context):
     if event['httpMethod'] != 'POST':
         return {
@@ -16,17 +18,26 @@ def handler(event, context):
 
     body = b64decode(event['body']).decode("utf-8") if event['isBase64Encoded'] else event['body']
 
+    additional_answers = json.loads(os.environ['ADDITIONAL_ANSWERS'])
+
     form_answer = {}
     for row in body.split("\n\n"):
         key,val = row.split(":\n")
+        key = f"<{key.upper()}>"
         val = val.removesuffix("\n")
         
         try:
-            val = parse(val).strftime(os.environ['DATE_FORMAT'])
-        except ValueError:
+            if '-' in val:
+                val = parse(val).strftime(os.environ['DATE_FORMAT'])
+        except Exception:
             pass
         
-        form_answer[f"<{key.upper()}>"] = val
+        form_answer[key] = val
+
+        if key in additional_answers:
+            for add_key,add_desc in additional_answers[key].items():
+                if val in add_desc:
+                    form_answer[add_key] = add_desc[val]
     
     print(f"ANSWERS: {form_answer}")
     
