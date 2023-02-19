@@ -23,8 +23,11 @@ def handler(event, context):
     form_answer = {}
     for row in body.split("\n\n"):
         key,val = row.split(":\n")
+        
+        key = key.replace('\n', '')
         key = f"<{key.upper()}>"
-        val = val.removesuffix("\n")
+        
+        val = val.replace('\n', '')
         
         try:
             if '-' in val:
