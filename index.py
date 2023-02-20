@@ -7,6 +7,7 @@ from mail import SendDocuments
 from dateutil.parser import parse
 
 import json
+import re
 
 def handler(event, context):
     if event['httpMethod'] != 'POST':
@@ -17,8 +18,6 @@ def handler(event, context):
     print(f"BODY: {event['body']}")
 
     body = b64decode(event['body']).decode("utf-8") if event['isBase64Encoded'] else event['body']
-
-    additional_answers = json.loads(os.environ['ADDITIONAL_ANSWERS'])
 
     form_answer = {}
     for row in body.split("\n\n"):
@@ -37,10 +36,16 @@ def handler(event, context):
         
         form_answer[key] = val
 
-        if key in additional_answers:
-            for add_key,add_desc in additional_answers[key].items():
-                if val in add_desc:
-                    form_answer[add_key] = add_desc[val]
+    additional_answers = json.loads(os.environ['ADDITIONAL_ANSWERS'])
+
+    for key,items in additional_answers.items():
+        for add_key,add_desc in items.items():
+            val = form_answer[key]
+            if val in add_desc:
+                form_answer[add_key] = add_desc[val]
+                for rps_key in re.findall(r"<[^<]*>", form_answer[add_key]):
+                    if rps_key in form_answer:
+                        form_answer[add_key] = form_answer[add_key].replace(rps_key, form_answer[rps_key])
     
     print(f"ANSWERS: {form_answer}")
     
