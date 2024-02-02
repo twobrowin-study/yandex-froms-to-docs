@@ -1,2 +1,5 @@
+python-dotenv
 python-docx
-python-dateutil
+Jinja2
+PyYAML
+pyTelegramBotAPI

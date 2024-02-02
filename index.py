@@ -1,61 +1,96 @@
 import os
+import dotenv
+import json, yaml
 from base64 import b64decode
+from jinja2 import Template
 
-from template import FillTemplate
-from mail import SendDocuments
+from datetime import datetime
 
-from dateutil.parser import parse
+dotenv.load_dotenv(dotenv.find_dotenv())
 
-import json
-import re
+from documents import DocxFillTemplate
+from mail import MailSendDocuments
+from telegram import TgSendDocuments
 
-def handler(event, context):
-    if event['httpMethod'] != 'POST':
-        return {
-            'statusCode': 405
-        }
-
-    print(f"BODY: {event['body']}")
-
+def handler(event: dict, context: dict):
+    """
+    Основной обработчик событий - внешних http запросов
+    """
     body = b64decode(event['body']).decode("utf-8") if event['isBase64Encoded'] else event['body']
+    form_answer: dict = json.loads(body)
+    print(f"FORM ANSWER:\n{json.dumps(form_answer)}")
 
-    form_answer = {}
-    for row in body.split("\n\n"):
-        key,val = row.split(":\n")
-        
-        key = key.replace('\n', '')
-        key = f"<{key.upper()}>"
-        
-        val = val.replace('\n', '')
-        
-        try:
-            if '-' in val:
-                val = parse(val).strftime(os.environ['DATE_FORMAT'])
-        except Exception:
-            pass
-        
-        form_answer[key] = val
+    with open('substitute.yaml', 'r') as substitute_file:
+        substitute: dict = yaml.safe_load(substitute_file)
 
-    additional_answers = json.loads(os.environ['ADDITIONAL_ANSWERS'])
+    form_data: dict = form_answer['answer']['data']
 
-    for key,items in additional_answers.items():
-        for add_key,add_desc in items.items():
-            val = form_answer[key]
-            if val in add_desc:
-                form_answer[add_key] = add_desc[val]
-                for rps_key in re.findall(r"<[^<]*>", form_answer[add_key]):
-                    if rps_key in form_answer:
-                        form_answer[add_key] = form_answer[add_key].replace(rps_key, form_answer[rps_key])
-    
-    print(f"ANSWERS: {form_answer}")
-    
-    mail_to = form_answer[os.environ['MAIL_TO_FORM_KEY']]
-    documents = [
-        (filename, FillTemplate(f"templates/{filename}", form_answer))
-        for filename in os.listdir('templates')
-    ]
-    SendDocuments(mail_to, documents)
-
-    return {
-        'statusCode': 200
+    ###################################
+    # Подготовка основных данных
+    ###################################
+    issue_main = {
+        'form_name': form_answer['form_name'],
+        'created':   form_answer['answer']['created']
     }
+
+    ###################################
+    # Подготовка данных о родителе
+    ###################################
+    issue_parent = { 
+        key: _safe_form_value(key, value)
+        for key, value in form_data.items() if not _key_is_answer_group(key)
+    }
+
+    ###################################
+    # Подготовка данных о детях
+    ###################################
+    issues_children = [
+        {
+            key: _safe_form_value(key, value) for key, value in child.items()
+        }
+        for key, value in form_data.items() if _key_is_answer_group(key)
+            for child in value['value']
+    ]
+
+    ###################################
+    # Подготовка данных для шаблонов
+    ###################################
+    issues = []
+    for issue_child in issues_children:
+        issue = issue_main | issue_parent | issue_child
+
+        # Подстановка данных из файла substitute.yaml
+        for key, value in substitute.items():
+            issue[key] = Template(value).render(issue)
+        issues.append(issue)
+
+    ###################################
+    # Генерация и высылка документов
+    ###################################
+    for issue in issues:
+        issue: dict
+        variables = {
+            f"{'{'}{'{'} {key} {'}'}{'}'}": f"{value}"
+            for key, value in issue.items()
+        }
+        documents = {
+            filename: DocxFillTemplate(f"templates/{filename}", variables)
+            for filename in os.listdir('templates')
+        }
+        MailSendDocuments(issue, documents)
+        TgSendDocuments(issue, documents)
+        
+def _key_is_answer_group(key: str) -> bool:
+    """
+    Проверка того, что заданный ключ является группой ответов
+    """
+    return key.startswith('answer_group')
+
+def _safe_form_value(key: str, value) -> str:
+    """
+    Безопасное получение данных формы - получает данные по формату и меняет формат записи даты
+    """
+    if key.endswith('date'):
+        datetime_obj = datetime.strptime(value['value'], '%Y-%m-%d')
+        return datetime_obj.strftime('%d.%m.%Y')
+    return value['value']
