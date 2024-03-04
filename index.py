@@ -73,10 +73,18 @@ def handler(event: dict, context: dict):
             f"{'{'}{'{'} {key} {'}'}{'}'}": f"{value}"
             for key, value in issue.items()
         }
+        template_files = os.listdir('templates')
         documents = {
             filename: DocxFillTemplate(f"templates/{filename}", variables)
-            for filename in os.listdir('templates')
+            for filename in template_files
+            if filename.endswith('.docx')
         }
+        for filename in template_files:
+            if filename.endswith('.pdf'):
+                with open(f"templates/{filename}", 'rb') as file:
+                    documents |= {
+                        filename: file.read()
+                    }
         MailSendDocuments(issue, documents)
         TgSendDocuments(issue, documents)
         
