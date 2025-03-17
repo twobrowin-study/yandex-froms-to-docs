@@ -1,14 +1,9 @@
+from pathlib import Path
+
 import index
 
-if __name__ == '__main__':
-    with open('test-body.json', 'r') as content:
-        body = content.read()
+if __name__ == "__main__":
     index.handler(
-        {
-            'body': body,
-            'isBase64Encoded': False
-        },
-        {
-            'test': True
-        }
+        {"body": Path("test-body.json").read_text(), "isBase64Encoded": False},
+        {"test": True},
     )
